@@ -14,8 +14,8 @@ This project implements a lightweight container runtime using Linux namespaces a
 
 ## Outputs
 
-Screenshots are available in the `/screenshots` folder.
+Screenshots are available in the `/image.png` folder.
 
 ## Report
 
-Full project report is available in `/report/OS-MINI-PROJECT.pdf`
+Full project report is available in `OS-MINI-PROJECT.docx`
