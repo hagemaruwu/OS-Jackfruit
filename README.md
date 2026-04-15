@@ -1,10 +1,63 @@
 # OS-Jackfruit: Multi-Container Runtime & Kernel Monitor
 
-**Team Member:** Aditya Raj (and Team)
+## 👥 Team Information
+- **Aditya Raj** - PES2UG24CS033
+- **Alakh Gupta** - PES2UG24CS051
 
-This project implements a lightweight Linux container runtime consisting of a user-space supervisor (`engine.c`) and a kernel-space memory monitor (`monitor.c`). It provides process isolation, concurrent logging, and strict resource enforcement.
+---
 
-## 🚀 Getting Started
+A lightweight Linux container runtime in C with a long-running supervisor and a kernel-space memory monitor.
+
+## 🛠️ Build and Run Instructions
+
+### 1. Build & Load
+```bash
+# Compile both user-space binaries and the kernel module
+cd boilerplate
+make
+
+# Load the memory monitor module
+sudo insmod monitor.ko
+```
+
+### 2. Start Supervisor
+```bash
+# Create a rootfs directory if not present
+mkdir rootfs-base
+# (Refer to project-guide.md for full rootfs setup)
+
+sudo ./engine supervisor ./rootfs-base
+```
+
+### 3. Run Containers
+```bash
+# Start a container in the background
+sudo ./engine start c1 ./rootfs-alpha "/bin/sh" --soft-mib 40 --hard-mib 64 --nice 0
+
+# List tracked containers
+sudo ./engine ps
+
+# Stop a container
+sudo ./engine stop c1
+```
+
+---
+
+## 🖼️ Demo & Screenshots
+*(Add your annotated screenshots here as per Task 6 requirement)*
+
+1. **Multi-container supervision:** (Screenshot of 2+ containers running)
+2. **Metadata tracking:** (Screenshot of `engine ps` output)
+3. **Bounded-buffer logging:** (Screenshot of log file contents)
+4. **CLI and IPC:** (Screenshot of command response)
+5. **Soft-limit warning:** (Screenshot of `dmesg` output)
+6. **Hard-limit enforcement:** (Screenshot of `dmesg` showing SIGKILL)
+7. **Scheduling experiment:** (Screenshot of performance data)
+8. **Clean teardown:** (Screenshot of `ps aux` showing no zombies)
+
+---
+
+## 🏗️ Architecture & Design Decisions
 
 ### 1. Build & Load
 ```bash
