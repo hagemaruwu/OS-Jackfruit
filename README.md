@@ -1,111 +1,71 @@
-# Multi-Container Runtime
+# OS-Jackfruit: Multi-Container Runtime & Kernel Monitor
 
-A lightweight Linux container runtime in C with a long-running supervisor and a kernel-space memory monitor.
+**Team Member:** Aditya Raj (and Team)
 
-Read [`project-guide.md`](project-guide.md) for the full project specification.
+This project implements a lightweight Linux container runtime consisting of a user-space supervisor (`engine.c`) and a kernel-space memory monitor (`monitor.c`). It provides process isolation, concurrent logging, and strict resource enforcement.
 
----
+## 🚀 Getting Started
 
-## Getting Started
-
-### 1. Fork the Repository
-
-1. Go to [github.com/shivangjhalani/OS-Jackfruit](https://github.com/shivangjhalani/OS-Jackfruit)
-2. Click **Fork** (top-right)
-3. Clone your fork:
-
+### 1. Build & Load
 ```bash
-git clone https://github.com/<your-username>/OS-Jackfruit.git
-cd OS-Jackfruit
-```
-
-### 2. Set Up Your VM
-
-You need an **Ubuntu 22.04 or 24.04** VM with **Secure Boot OFF**. WSL will not work.
-
-Install dependencies:
-
-```bash
-sudo apt update
-sudo apt install -y build-essential linux-headers-$(uname -r)
-```
-
-### 3. Run the Environment Check
-
-```bash
-cd boilerplate
-chmod +x environment-check.sh
-sudo ./environment-check.sh
-```
-
-Fix any issues reported before moving on.
-
-### 4. Prepare the Root Filesystem
-
-```bash
-mkdir rootfs-base
-wget https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.3-x86_64.tar.gz
-tar -xzf alpine-minirootfs-3.20.3-x86_64.tar.gz -C rootfs-base
-
-# Make one writable copy per container you plan to run
-cp -a ./rootfs-base ./rootfs-alpha
-cp -a ./rootfs-base ./rootfs-beta
-```
-
-Do not commit `rootfs-base/` or `rootfs-*` directories to your repository.
-
-### 5. Understand the Boilerplate
-
-The `boilerplate/` folder contains starter files:
-
-| File                   | Purpose                                             |
-| ---------------------- | --------------------------------------------------- |
-| `engine.c`             | User-space runtime and supervisor skeleton          |
-| `monitor.c`            | Kernel module skeleton                              |
-| `monitor_ioctl.h`      | Shared ioctl command definitions                    |
-| `Makefile`             | Build targets for both user-space and kernel module |
-| `cpu_hog.c`            | CPU-bound test workload                             |
-| `io_pulse.c`           | I/O-bound test workload                             |
-| `memory_hog.c`         | Memory-consuming test workload                      |
-| `environment-check.sh` | VM environment preflight check                      |
-
-Use these as your starting point. You are free to restructure the repository however you want — the submission requirements are listed in the project guide.
-
-### 6. Build and Verify
-
-```bash
+# Compile both user-space binaries and the kernel module
 cd boilerplate
 make
+
+# Load the memory monitor module
+sudo insmod monitor.ko
 ```
 
-If this compiles without errors, your environment is ready.
-
-### 7. GitHub Actions Smoke Check
-
-Your fork will inherit a minimal GitHub Actions workflow from this repository.
-
-That workflow only performs CI-safe checks:
-
-- `make -C boilerplate ci`
-- user-space binary compilation (`engine`, `memory_hog`, `cpu_hog`, `io_pulse`)
-- `./boilerplate/engine` with no arguments must print usage and exit with a non-zero status
-
-The CI-safe build command is:
-
+### 2. Start Supervisor
 ```bash
-make -C boilerplate ci
+sudo ./engine supervisor ./rootfs-base
 ```
 
-This smoke check does not test kernel-module loading, supervisor runtime behavior, or container execution.
+### 3. Run Containers
+```bash
+# In a separate terminal
+sudo ./engine start c1 ./rootfs-alpha "/bin/sh -c './cpu_hog'" --hard-mib 128
+sudo ./engine ps
+```
 
 ---
 
-## What to Do Next
+## 🏗️ Architecture & Design Decisions
 
-Read [`project-guide.md`](project-guide.md) end to end. It contains:
+### 1. Control Plane IPC (UNIX Domain Sockets)
+We chose **UNIX Domain Sockets** for the CLI-to-Supervisor communication.
+- **Tradeoff:** It is more complex than FIFOs but supports full bidirectional communication and structured message passing (`control_request_t`).
+- **Justification:** Essential for the `ps` and `logs` commands where the supervisor must send data back to the client reliably.
 
-- The six implementation tasks (multi-container runtime, CLI, logging, kernel monitor, scheduling experiments, cleanup)
-- The engineering analysis you must write
-- The exact submission requirements, including what your `README.md` must contain (screenshots, analysis, design decisions)
+### 2. Isolation (Namespaces & Chroot)
+The runtime uses the `clone()` system call with `CLONE_NEWPID`, `CLONE_NEWUTS`, and `CLONE_NEWNS`.
+- **Logic:** This ensures the container sees its own PID 1 and has its own isolated hostname.
+- **Filesystem:** We used `chroot` for ease of implementation, providing a clean jail within the provided `rootfs-*` directory.
 
-Your fork's `README.md` should be replaced with your own project documentation as described in the submission package section of the project guide. (As in get rid of all the above content and replace with your README.md)
+### 3. Bounded-Buffer Logging
+A concurrent pipeline handles container output:
+- **Synchronization:** Uses a `pthread_mutex_t` and two `pthread_cond_t` (not_full, not_empty).
+- **Benefit:** This prevents the supervisor from dropping log lines even if the disk I/O is slow, acting as an elastic buffer.
+
+### 4. Kernel Memory Monitor
+The LKM tracks processes in a linked list and monitors RSS (Resident Set Size).
+- **Soft Limit:** Triggers an alert in `dmesg` to warn the supervisor.
+- **Hard Limit:** Sends an immediate `SIGKILL` to prevent a rogue container from crashing the host.
+
+---
+
+## 📈 Engineering Analysis
+
+### 1. Isolation Mechanism
+Namespaces allow the host to share its kernel with containers while providing the *illusion* of a private system. The host kernel still manages all hardware, but the container's view of PIDs and mount points is strictly restricted.
+
+### 2. Process Lifecycle
+The long-running supervisor is the "reaper." By handling `SIGCHLD`, it ensures that even if a container crashes, its resources are freed and it is properly removed from the process table, preventing "zombie" accumulation.
+
+### 3. Memory & RSS
+RSS measures the actual physical RAM occupied by a process. We enforce limits in kernel-space because it is the only way to guarantee a process cannot ignore the limit—a user-space monitor might be slow or preempted, allowing a memory spike to go unchecked.
+
+---
+
+## 🧪 Scheduler Experiments
+Using the `--nice` flag, we demonstrated that the Linux Completely Fair Scheduler (CFS) correctly prioritizes containers with lower nice values during CPU contention, granting them a larger share of the CPU cycles as measured by completion time of the `cpu_hog` workload.
