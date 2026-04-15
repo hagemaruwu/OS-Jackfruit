@@ -43,6 +43,47 @@ sudo ./engine stop c1
 
 ---
 
+## 🎨 System Visualization
+
+### 1. Architecture Overview
+```mermaid
+graph TD
+    subgraph "User Space (Supervisor)"
+        A[CLI Client] <-->|UNIX Socket| B[Supervisor Daemon]
+        B -->|fork/exec| C[Isolated Container]
+        C -->|Pipes| D[Bounded Buffer]
+        D -->|Worker Thread| E[Log Files]
+    end
+    subgraph "Kernel Space (LKM)"
+        F[Kernel Memory Monitor]
+        B <-->|IOCTL| F
+        F -->|Period RSS Check| C
+        F -.->|SIGKILL if Hard Limit| C
+    end
+```
+
+### 2. Container Lifecycle & Enforcement
+```mermaid
+sequenceDiagram
+    participant S as Supervisor
+    participant C as Container
+    participant K as Kernel Monitor
+    participant L as Log File
+
+    S->>C: clone() with Namespaces
+    S->>K: IOCTL (Register PID + Limits)
+    loop Periodic Check
+        C->>L: Output logs via Pipe
+        K->>C: Inspect RSS Memory
+        Note over K: Soft Limit Reached?
+        K-->>S: Emit Warning (dmesg)
+        Note over K: Hard Limit Reached?
+        K->>C: SIGKILL (Force Stop)
+    end
+```
+
+---
+
 ## 🖼️ Demo & Sample Output
 
 ### 1. Multi-container Metadata (`engine ps`)
