@@ -387,9 +387,42 @@ int unregister_from_monitor(int monitor_fd, const char *container_id, pid_t host
  *   - accept control requests and update container state
  *   - reap children and respond to signals
  */
+static int handle_client_request(supervisor_ctx_t *ctx, int client_fd)
+{
+    control_request_t req;
+    control_response_t res;
+    ssize_t n;
+
+    n = read(client_fd, &req, sizeof(req));
+    if (n < (ssize_t)sizeof(req)) {
+        return -1;
+    }
+
+    memset(&res, 0, sizeof(res));
+    res.status = 0;
+
+    pthread_mutex_lock(&ctx->metadata_lock);
+    switch (req.kind) {
+    case CMD_PS:
+        snprintf(res.message, sizeof(res.message), "Supervisor is active. Metadata tracking coming in next commit.");
+        break;
+    case CMD_STOP:
+        snprintf(res.message, sizeof(res.message), "Stop requested for %s (Implementation pending)", req.container_id);
+        break;
+    default:
+        snprintf(res.message, sizeof(res.message), "Command %d accepted (Logic pending)", req.kind);
+        break;
+    }
+    pthread_mutex_unlock(&ctx->metadata_lock);
+
+    write(client_fd, &res, sizeof(res));
+    return 0;
+}
+
 static int run_supervisor(const char *rootfs)
 {
     supervisor_ctx_t ctx;
+    struct sockaddr_un addr;
     int rc;
 
     memset(&ctx, 0, sizeof(ctx));
@@ -411,20 +444,47 @@ static int run_supervisor(const char *rootfs)
         return 1;
     }
 
-    /*
-     * TODO:
-     *   1) open /dev/container_monitor
-     *   2) create the control socket / FIFO / shared-memory channel
-     *   3) install SIGCHLD / SIGINT / SIGTERM handling
-     *   4) spawn the logger thread
-     *   5) enter the supervisor event loop
-     */
-    fprintf(stderr, "Supervisor mode not implemented yet for base-rootfs: %s\n", rootfs);
+    ctx.server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (ctx.server_fd < 0) {
+        perror("socket");
+        return 1;
+    }
 
+    unlink(CONTROL_PATH);
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, CONTROL_PATH, sizeof(addr.sun_path) - 1);
+
+    if (bind(ctx.server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("bind");
+        return 1;
+    }
+
+    if (listen(ctx.server_fd, 5) < 0) {
+        perror("listen");
+        return 1;
+    }
+
+    printf("Supervisor started. Base rootfs: %s\n", rootfs);
+    printf("Control socket: %s\n", CONTROL_PATH);
+
+    while (!ctx.should_stop) {
+        int client_fd = accept(ctx.server_fd, NULL, NULL);
+        if (client_fd < 0) {
+            if (errno == EINTR) continue;
+            perror("accept");
+            break;
+        }
+        handle_client_request(&ctx, client_fd);
+        close(client_fd);
+    }
+
+    close(ctx.server_fd);
+    unlink(CONTROL_PATH);
     bounded_buffer_begin_shutdown(&ctx.log_buffer);
     bounded_buffer_destroy(&ctx.log_buffer);
     pthread_mutex_destroy(&ctx.metadata_lock);
-    return 1;
+    return 0;
 }
 
 /*
@@ -437,9 +497,46 @@ static int run_supervisor(const char *rootfs)
  */
 static int send_control_request(const control_request_t *req)
 {
-    (void)req;
-    fprintf(stderr, "Control-plane client path not implemented.\n");
-    return 1;
+    int fd;
+    struct sockaddr_un addr;
+    control_response_t res;
+
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        perror("socket");
+        return 1;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, CONTROL_PATH, sizeof(addr.sun_path) - 1);
+
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        fprintf(stderr, "Error: Could not connect to supervisor. Is it running?\n");
+        close(fd);
+        return 1;
+    }
+
+    if (write(fd, req, sizeof(*req)) < (ssize_t)sizeof(*req)) {
+        perror("write");
+        close(fd);
+        return 1;
+    }
+
+    if (read(fd, &res, sizeof(res)) < (ssize_t)sizeof(res)) {
+        perror("read");
+        close(fd);
+        return 1;
+    }
+
+    if (res.status == 0) {
+        printf("%s\n", res.message);
+    } else {
+        fprintf(stderr, "Remote error: %s\n", res.message);
+    }
+
+    close(fd);
+    return res.status;
 }
 
 static int cmd_start(int argc, char *argv[])
