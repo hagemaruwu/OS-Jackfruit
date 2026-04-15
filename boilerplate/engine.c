@@ -392,17 +392,21 @@ int child_fn(void *arg)
     /* Set hostname for UTS isolation */
     sethostname(cfg->id, strlen(cfg->id));
 
-    /* Mount proc to show only container PIDs */
+    /* Mount proc to show only container PIDs (Linux specific) */
+#ifdef __linux__
     if (mount("proc", "/proc", "proc", 0, NULL) < 0) {
         perror("mount proc");
         return 1;
     }
+#endif
 
-    /* Isolate filesystem */
+    /* Isolate filesystem (Linux specific) */
+#ifdef __linux__
     if (chroot(cfg->rootfs) < 0) {
         perror("chroot");
         return 1;
     }
+#endif
     chdir("/");
 
     /* Execute the command */
@@ -552,8 +556,15 @@ static int handle_client_request(supervisor_ctx_t *ctx, int client_fd)
 
         cfg->log_write_fd = pipe_fds[1];
 
-        pid_t pid = clone(child_fn, stack + STACK_SIZE, 
+        pid_t pid = -1;
+#ifdef __linux__
+        pid = clone(child_fn, stack + STACK_SIZE, 
                           CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS | SIGCHLD, cfg);
+#else
+        /* Logic for macOS/other systems (not functional for containers) */
+        (void)child_fn; (void)stack;
+        fprintf(stderr, "Warning: Container spawning is only supported on Linux.\n");
+#endif
         
         if (pid < 0) {
             close(pipe_fds[0]);
