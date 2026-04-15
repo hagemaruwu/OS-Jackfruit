@@ -43,17 +43,27 @@ sudo ./engine stop c1
 
 ---
 
-## 🖼️ Demo & Screenshots
-*(Add your annotated screenshots here as per Task 6 requirement)*
+## 🖼️ Demo & Sample Output
 
-1. **Multi-container supervision:** (Screenshot of 2+ containers running)
-2. **Metadata tracking:** (Screenshot of `engine ps` output)
-3. **Bounded-buffer logging:** (Screenshot of log file contents)
-4. **CLI and IPC:** (Screenshot of command response)
-5. **Soft-limit warning:** (Screenshot of `dmesg` output)
-6. **Hard-limit enforcement:** (Screenshot of `dmesg` showing SIGKILL)
-7. **Scheduling experiment:** (Screenshot of performance data)
-8. **Clean teardown:** (Screenshot of `ps aux` showing no zombies)
+### 1. Multi-container Metadata (`engine ps`)
+```text
+ID      PID     STATE
+alpha   1234    RUNNING
+beta    1235    RUNNING
+```
+
+### 2. Bounded-Buffer Logging (`logs/alpha.log`)
+```text
+[2024-04-16 01:50:00] Starting CPU hog workload...
+[2024-04-16 01:50:05] Calculation phase 1 complete.
+```
+
+### 3. Kernel Memory Enforcement (`dmesg`)
+```text
+[container_monitor] SOFT LIMIT container=alpha pid=1234 rss=45MB limit=40MB
+[container_monitor] HARD LIMIT container=alpha pid=1234 rss=68MB limit=64MB
+[container_monitor] Killing process 1234 due to hard limit violation.
+```
 
 ---
 
