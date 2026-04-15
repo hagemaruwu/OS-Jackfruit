@@ -101,6 +101,8 @@ root      3892  0.1  0.2   8912  1856 pts/1   S    10:34   0:00 /bin/sh -c sleep
 ```
 ✅ **Result:** Supervisor (3748) managing 2 concurrent containers (3847, 3892)
 
+![Demo 1 - Multi-container supervision](screenshots/image53.jpg)
+
 ---
 
 ### 2. Metadata Tracking (ps output)
@@ -112,6 +114,8 @@ beta    3892    RUNNING         40         64         0/0
 gamma   3761    EXITED          64         96         0/0
 ```
 ✅ **Result:** All container metadata accurately tracked and displayed
+
+![Demo 2 - Metadata tracking](screenshots/image72.jpg)
 
 ---
 
@@ -135,6 +139,8 @@ Calculation round 2: 9643207456 ops
 [... 45 more lines of output ...]
 ```
 ✅ **Result:** 88 lines from 3 containers captured without loss through bounded buffer
+
+![Demo 3 - Bounded-buffer logging](screenshots/image111.jpg)
 
 ---
 
@@ -162,6 +168,8 @@ web     4156    STOPPED         40         64         0/15
 ```
 ✅ **Result:** CLI commands transmit via UNIX socket; state updates immediate and accurate
 
+![Demo 4 - CLI and IPC](screenshots/image112.jpg)
+
 ---
 
 ### 5. Soft-Limit Warning
@@ -175,6 +183,8 @@ root@ubuntu: dmesg | tail -20
 [12354.789013] [container_monitor] (suppressing duplicate warning)
 ```
 ✅ **Result:** Kernel logs soft-limit exceeded once at 41 MiB; container continues running
+
+![Demo 5 - Soft-limit warning](screenshots/image68.jpg)
 
 ---
 
@@ -193,6 +203,8 @@ killer  4899    KILLED          40         64         0/9
                                             exit_signal = 9 (SIGKILL)
 ```
 ✅ **Result:** SIGKILL sent when RSS exceeds hard limit; supervisor correctly classifies as KILLED
+
+![Demo 6 - Hard-limit enforcement](screenshots/image37.jpg)
 
 ---
 
@@ -217,6 +229,8 @@ During execution ps shows:
 Demonstrates fair weighted scheduling per CFS algorithm. High priority completes 33% faster.
 
 ✅ **Result:** Scheduler experiment validates Linux CFS priority weighting
+
+![Demo 7 - Scheduling experiment](screenshots/image5.jpg)
 
 ---
 
@@ -247,6 +261,8 @@ ls: cannot access '/dev/container_monitor': No such file or directory
 ✓ Device cleaned up
 ```
 ✅ **Result:** Complete resource cleanup; no leaks, no zombies, logs complete and readable
+
+![Demo 8 - Clean teardown](screenshots/image20.png)
 
 ---
 
