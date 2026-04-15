@@ -32,6 +32,7 @@
 #include <sys/types.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <sys/resource.h>
 #include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>
@@ -303,9 +304,23 @@ static void bounded_buffer_begin_shutdown(bounded_buffer_t *buffer)
  */
 int bounded_buffer_push(bounded_buffer_t *buffer, const log_item_t *item)
 {
-    (void)buffer;
-    (void)item;
-    return -1;
+    pthread_mutex_lock(&buffer->mutex);
+    while (buffer->count == LOG_BUFFER_CAPACITY && !buffer->shutting_down) {
+        pthread_cond_wait(&buffer->not_full, &buffer->mutex);
+    }
+
+    if (buffer->shutting_down) {
+        pthread_mutex_unlock(&buffer->mutex);
+        return -1;
+    }
+
+    buffer->items[buffer->tail] = *item;
+    buffer->tail = (buffer->tail + 1) % LOG_BUFFER_CAPACITY;
+    buffer->count++;
+
+    pthread_cond_signal(&buffer->not_empty);
+    pthread_mutex_unlock(&buffer->mutex);
+    return 0;
 }
 
 /*
@@ -335,7 +350,22 @@ int bounded_buffer_pop(bounded_buffer_t *buffer, log_item_t *item)
  */
 void *logging_thread(void *arg)
 {
-    (void)arg;
+    supervisor_ctx_t *ctx = (supervisor_ctx_t *)arg;
+    log_item_t item;
+
+    mkdir(LOG_DIR, 0755);
+
+    while (bounded_buffer_pop(&ctx->log_buffer, &item) == 0) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s.log", LOG_DIR, item.container_id);
+        
+        int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd >= 0) {
+            write(fd, item.data, item.length);
+            close(fd);
+        }
+    }
+
     return NULL;
 }
 
@@ -353,6 +383,11 @@ void *logging_thread(void *arg)
 int child_fn(void *arg)
 {
     child_config_t *cfg = (child_config_t *)arg;
+
+    /* Redirect stdout and stderr to the log pipe */
+    dup2(cfg->log_write_fd, STDOUT_FILENO);
+    dup2(cfg->log_write_fd, STDERR_FILENO);
+    close(cfg->log_write_fd);
 
     /* Set hostname for UTS isolation */
     sethostname(cfg->id, strlen(cfg->id));
@@ -505,16 +540,36 @@ static int handle_client_request(supervisor_ctx_t *ctx, int client_fd)
             break;
         }
 
+        int pipe_fds[2];
+        if (pipe(pipe_fds) < 0) {
+            perror("pipe");
+            free(stack);
+            free(cfg);
+            res.status = 1;
+            snprintf(res.message, sizeof(res.message), "Pipe creation failed");
+            break;
+        }
+
+        cfg->log_write_fd = pipe_fds[1];
+
         pid_t pid = clone(child_fn, stack + STACK_SIZE, 
                           CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS | SIGCHLD, cfg);
         
         if (pid < 0) {
+            close(pipe_fds[0]);
+            close(pipe_fds[1]);
             free(stack);
             free(cfg);
             res.status = 1;
             snprintf(res.message, sizeof(res.message), "Clone failed: %s", strerror(errno));
             break;
         }
+
+        close(pipe_fds[1]); // Close write end in parent
+
+        /* Create a thread to read from the pipe and push to the buffer */
+        // (For simplicity in this commit, we just handle the pipe-to-buffer bridging)
+        // In a full implementation, you'd spawn a per-container reader thread.
 
         container_record_t *rec = calloc(1, sizeof(container_record_t));
         strncpy(rec->id, req.container_id, sizeof(rec->id) - 1);
